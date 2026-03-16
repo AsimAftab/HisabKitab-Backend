@@ -1,11 +1,15 @@
 # HisabKitab Backend
 
-A secure and scalable REST API backend for HisabKitab (Account Book) application built with Spring Boot 4.0.2 and Java 17. The API provides robust JWT-based authentication with access and refresh token support, user management, and PostgreSQL database integration.
+A secure REST API backend for HisabKitab (Account Book) built with Spring Boot 4.0.2 and Java 17. The API currently provides JWT authentication, user profile access, transaction management, monthly balance summaries, PostgreSQL persistence, and Flyway-based schema migrations.
 
 ## 🚀 Features
 
 - **JWT Authentication**: Secure authentication with access tokens (1 hour) and refresh tokens (90 days)
 - **User Management**: Registration, login, logout, and token refresh
+- **User Profile**: Authenticated `/api/v1/user/me` endpoint
+- **Transactions**: Create, list, update, delete income and expense entries
+- **Filtering & Pagination**: Filter transactions by type or date range and paginate results
+- **Monthly Balance Summary**: Current-month income, expense, and balance totals
 - **Database Migrations**: Automated schema management with Flyway
 - **API Documentation**: Interactive API docs with Swagger/OpenAPI
 - **Security**: Spring Security with stateless session management
@@ -28,8 +32,8 @@ Before you begin, ensure you have the following installed:
 |------------|---------|---------|
 | Java | 17 | Programming language |
 | Spring Boot | 4.0.2 | Application framework |
-| Spring Security | 6.x | Authentication & authorization |
-| Spring Data JPA | 3.x | Database ORM |
+| Spring Security | 7.x | Authentication & authorization |
+| Spring Data JPA | 4.x | Database ORM |
 | PostgreSQL | - | Relational database |
 | Flyway | - | Database migrations |
 | Lombok | 1.18.42 | Reduce boilerplate code |
@@ -68,7 +72,7 @@ supabase start
 
 1. Install PostgreSQL
 2. Create a database named `hisabkitab`
-3. Update `src/main/resources/application-dev.properties` with your credentials
+3. Update `src/main/resources/application-dev.properties` or use environment variables for your credentials
 
 ### 3. Configure Application
 
@@ -76,6 +80,12 @@ The application uses profile-based configuration:
 
 - **Development**: `application-dev.properties` (default)
 - **Production**: `application-prod.properties`
+
+Important notes:
+
+- Spring Boot 4 requires `spring-boot-starter-flyway` for Flyway auto-configuration
+- Development is configured to use Flyway with `spring.jpa.hibernate.ddl-auto=none`
+- The current dev database setup assumes baseline version `2` because the shared dev database already had `users` and `refresh_tokens` before Flyway history was introduced
 
 **JWT Secret Configuration:**
 
@@ -91,6 +101,16 @@ Or set as environment variable:
 
 ```bash
 export JWT_SECRET=your-super-secret-key-at-least-256-bits-long
+```
+
+Recommended production environment variables:
+
+```bash
+export DATABASE_URL=jdbc:postgresql://host:5432/postgres
+export DATABASE_USERNAME=postgres
+export DATABASE_PASSWORD=your-password
+export JWT_SECRET=your-super-secret-key-at-least-32-chars
+export CORS_ALLOWED_ORIGINS=https://your-frontend.example.com
 ```
 
 ### 4. Build the Project
@@ -164,7 +184,13 @@ Once the application is running, access the interactive API documentation:
 | `/api/v1/auth/login` | POST | Login user | No |
 | `/api/v1/auth/refresh` | POST | Refresh access token | No |
 | `/api/v1/auth/logout` | POST | Logout user | No |
-| `/actuator/health` | GET | Health check | Admin |
+| `/api/v1/user/me` | GET | Get current user profile | Yes |
+| `/api/v1/transactions` | POST | Create transaction | Yes |
+| `/api/v1/transactions` | GET | List transactions with pagination and filters | Yes |
+| `/api/v1/transactions/summary/current-month` | GET | Get current month balance summary | Yes |
+| `/api/v1/transactions/{transactionId}` | PUT | Update transaction | Yes |
+| `/api/v1/transactions/{transactionId}` | DELETE | Delete transaction | Yes |
+| `/actuator/health` | GET | Health check | No |
 
 ### Example: User Registration
 
@@ -207,6 +233,57 @@ curl -X POST http://localhost:8080/api/v1/auth/login \
 
 For more detailed API documentation, see [docs/JWT_AUTHENTICATION_GUIDE.md](docs/JWT_AUTHENTICATION_GUIDE.md)
 
+### Example: Get Current User
+
+```bash
+curl http://localhost:8080/api/v1/user/me \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+### Example: Create Transaction
+
+```bash
+curl -X POST http://localhost:8080/api/v1/transactions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -d '{
+    "type": "EXPENSE",
+    "name": "Lunch",
+    "description": "Team lunch at cafe",
+    "amount": 450.00,
+    "category": "Food",
+    "date": "2026-03-17"
+  }'
+```
+
+### Example: List Transactions
+
+```bash
+curl "http://localhost:8080/api/v1/transactions?page=0&size=20" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+### Example: Filter Transactions By Date Range
+
+```bash
+curl "http://localhost:8080/api/v1/transactions?from=2026-03-01&to=2026-03-31&page=0&size=20" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+For one day only, use the same date for both:
+
+```bash
+curl "http://localhost:8080/api/v1/transactions?from=2026-03-17&to=2026-03-17&page=0&size=20" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+### Example: Current Month Summary
+
+```bash
+curl http://localhost:8080/api/v1/transactions/summary/current-month \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
 ## 📁 Project Structure
 
 ```
@@ -215,22 +292,15 @@ HisabKitab-Backend/
 │   ├── main/
 │   │   ├── java/com/example/hisabkitabbackend/
 │   │   │   ├── auth/              # Authentication module
-│   │   │   │   ├── dto/           # Data Transfer Objects
-│   │   │   │   ├── service/       # Business logic
-│   │   │   │   ├── AuthController.java
-│   │   │   │   ├── JwtAuthenticationFilter.java
-│   │   │   │   └── UserDetailsServiceImpl.java
+│   │   │   │   ├── dto/           # Auth DTOs
+│   │   │   │   ├── service/       # Auth business logic
 │   │   │   ├── common/            # Shared components
 │   │   │   │   ├── exception/     # Exception handling
 │   │   │   │   └── response/      # Response wrappers
 │   │   │   ├── config/            # Configuration classes
-│   │   │   │   ├── SecurityConfig.java
-│   │   │   │   ├── OpenApiConfig.java
-│   │   │   │   └── JpaConfig.java
+│   │   │   ├── transaction/       # Transaction module
+│   │   │   │   ├── dto/           # Transaction DTOs
 │   │   │   ├── user/              # User domain
-│   │   │   │   ├── User.java
-│   │   │   │   ├── RefreshToken.java
-│   │   │   │   └── Repositories...
 │   │   │   └── HisabKitabBackendApplication.java
 │   │   └── resources/
 │   │       ├── db/migration/      # Flyway migrations
@@ -253,6 +323,7 @@ HisabKitab-Backend/
 - **Stateless Sessions**: No server-side session management
 - **CSRF Protection**: Disabled (JWT-based auth doesn't require it)
 - **Refresh Token Revocation**: Logout invalidates refresh tokens in database
+- **Request Logging**: API requests are logged with path, status, duration, IP, and user
 
 ## 🧪 Development Guidelines
 
@@ -267,7 +338,9 @@ HisabKitab-Backend/
 
 - Create new migration files in `src/main/resources/db/migration/`
 - Follow naming convention: `V{version}__{description}.sql`
-- Example: `V3__add_user_roles.sql`
+- Example: `V6__add_transaction_tags.sql`
+- Do not rely on Hibernate schema auto-update for this project
+- Use Flyway for all schema changes
 
 ### Testing
 
@@ -297,6 +370,12 @@ Contributions are welcome! Please follow these steps:
 **Issue**: Application fails to start with database connection error
 - **Solution**: Ensure PostgreSQL is running and credentials are correct
 
+**Issue**: Flyway does not appear to run on startup
+- **Solution**: Ensure `spring-boot-starter-flyway` is present and check logs for Flyway startup lines
+
+**Issue**: Flyway baselining conflicts with existing dev tables**
+- **Solution**: The shared dev DB is currently baselined at version `2`; if `flyway_schema_history` gets created incorrectly, drop it and restart with the configured baseline
+
 **Issue**: JWT token validation fails
 - **Solution**: Check that `jwt.secret` is properly configured and not empty
 
@@ -322,4 +401,4 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ---
 
-**Built with ❤️ using Spring Boot**
+Built with Spring Boot

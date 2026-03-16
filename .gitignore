@@ -50,6 +50,10 @@ logs/
 ### Maven ###
 *.jar
 !.mvn/wrapper/*.jar
+.m2/
+temp-maven-settings.xml
+.mvn/local-settings.xml
+dependency-reduced-pom.xml
 
 ### Misc ###
 nul
